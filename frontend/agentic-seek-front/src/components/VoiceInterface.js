@@ -1,318 +1,205 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './VoiceInterface.css';
 
 const VoiceInterface = ({ onVoiceCommand, onVoiceStateChange, isProcessing }) => {
   const [isListening, setIsListening] = useState(false);
-  const [isWakeWordMode, setIsWakeWordMode] = useState(true);
   const [transcript, setTranscript] = useState('');
-  const [wakeWordDetected, setWakeWordDetected] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
-  const [audioLevel, setAudioLevel] = useState(0);
+  const [status, setStatus] = useState('Ready');
   
   const recognitionRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const microphoneRef = useRef(null);
-  const animationFrameRef = useRef(null);
+  const isActiveRef = useRef(true);
   
-  const wakeWords = ['jarvis', 'hey jarvis', 'hello jarvis'];
-  const confirmWords = ['do it', 'go ahead', 'execute', 'please', 'run', 'start', 'thanks'];
-
-  useEffect(() => {
-    // Check for speech recognition support
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      setVoiceSupported(true);
-      initializeSpeechRecognition();
+  const cleanup = useCallback(() => {
+    isActiveRef.current = false;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {
+        console.log('Recognition cleanup error:', error);
+      }
     }
-    
-    return () => {
-      cleanup();
-    };
   }, []);
 
-  const initializeSpeechRecognition = () => {
+  const initializeSpeechRecognition = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return false;
+
     recognitionRef.current = new SpeechRecognition();
     
-    recognitionRef.current.continuous = true;
-    recognitionRef.current.interimResults = true;
+    recognitionRef.current.continuous = false;
+    recognitionRef.current.interimResults = false;
     recognitionRef.current.lang = 'en-US';
     
     recognitionRef.current.onstart = () => {
+      if (!isActiveRef.current) return;
       console.log('Voice recognition started');
       setIsListening(true);
+      setStatus('Listening... Say "Jarvis [command]"');
       if (onVoiceStateChange) {
         onVoiceStateChange({ listening: true, transcript: '' });
       }
     };
     
     recognitionRef.current.onresult = (event) => {
-      let finalTranscript = '';
-      let interimTranscript = '';
+      if (!isActiveRef.current) return;
       
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript.toLowerCase().trim();
-        
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript;
-        } else {
-          interimTranscript += transcript;
-        }
-      }
+      const result = event.results[0][0].transcript.trim();
+      setTranscript(result);
       
-      const fullTranscript = (finalTranscript || interimTranscript).toLowerCase();
-      setTranscript(fullTranscript);
+      console.log('Voice result:', result);
       
-      if (isWakeWordMode && !wakeWordDetected) {
-        // Check for wake word
-        const wakeWordFound = wakeWords.some(word => fullTranscript.includes(word));
-        if (wakeWordFound) {
-          setWakeWordDetected(true);
-          setIsWakeWordMode(false);
-          setTranscript('');
-          playWakeSound();
-          console.log('Wake word detected!');
-        }
-      } else if (!isWakeWordMode && finalTranscript) {
-        // Check for confirmation words
-        const confirmFound = confirmWords.some(word => finalTranscript.includes(word));
-        if (confirmFound) {
-          handleCommand(transcript);
-          resetVoiceState();
-        } else {
-          // Store the command but don't execute yet
-          setTranscript(finalTranscript);
-        }
+      // Check for wake words
+      const lowerResult = result.toLowerCase();
+      const wakeWords = ['jarvis', 'hey jarvis', 'hello jarvis'];
+      const hasWakeWord = wakeWords.some(word => lowerResult.includes(word));
+      
+      if (hasWakeWord && onVoiceCommand) {
+        setStatus('Processing command...');
+        onVoiceCommand(result);
+      } else {
+        setStatus('Please say "Jarvis" followed by your command');
       }
     };
     
     recognitionRef.current.onerror = (event) => {
-      console.error('Speech recognition error:', event.error);
-      resetVoiceState();
+      if (!isActiveRef.current) return;
+      console.log('Speech recognition error:', event.error);
+      setIsListening(false);
+      
+      switch(event.error) {
+        case 'no-speech':
+          setStatus('No speech detected');
+          break;
+        case 'not-allowed':
+          setStatus('Microphone access denied');
+          break;
+        default:
+          setStatus('Voice recognition error');
+      }
     };
     
     recognitionRef.current.onend = () => {
+      if (!isActiveRef.current) return;
       console.log('Speech recognition ended');
-      if (isListening) {
-        // Restart if we're still supposed to be listening
-        setTimeout(() => {
-          if (recognitionRef.current && isListening) {
-            recognitionRef.current.start();
-          }
-        }, 100);
-      }
+      setIsListening(false);
+      
+      setTimeout(() => {
+        if (isActiveRef.current) {
+          setStatus('Click microphone to speak');
+        }
+      }, 1000);
     };
+    
+    return true;
+  }, [onVoiceCommand, onVoiceStateChange]);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      setVoiceSupported(true);
+      initializeSpeechRecognition();
+    } else {
+      setStatus('Voice recognition not supported in this browser');
+    }
+    
+    return cleanup;
+  }, [initializeSpeechRecognition, cleanup]);
+
+  const toggleListening = () => {
+    if (isProcessing) return;
+    
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
   };
 
-  const startListening = async () => {
-    if (!voiceSupported || !recognitionRef.current) return;
+  const startListening = () => {
+    if (!voiceSupported || !recognitionRef.current || isProcessing) return;
     
     try {
-      // Start audio level monitoring
-      await startAudioMonitoring();
-      
-      // Start speech recognition
-      recognitionRef.current.start();
-      setIsWakeWordMode(true);
-      setWakeWordDetected(false);
       setTranscript('');
+      setStatus('Starting...');
+      recognitionRef.current.start();
     } catch (error) {
       console.error('Error starting voice recognition:', error);
+      setStatus('Failed to start listening');
     }
   };
 
   const stopListening = () => {
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {
+        console.log('Error stopping recognition:', error);
+      }
     }
-    stopAudioMonitoring();
-    resetVoiceState();
-  };
-
-  const startAudioMonitoring = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      microphoneRef.current = audioContextRef.current.createMediaStreamSource(stream);
-      
-      microphoneRef.current.connect(analyserRef.current);
-      analyserRef.current.fftSize = 256;
-      
-      const bufferLength = analyserRef.current.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      
-      const updateAudioLevel = () => {
-        if (analyserRef.current) {
-          analyserRef.current.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((a, b) => a + b) / bufferLength;
-          setAudioLevel(average);
-          animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
-        }
-      };
-      
-      updateAudioLevel();
-    } catch (error) {
-      console.error('Error starting audio monitoring:', error);
-    }
-  };
-
-  const stopAudioMonitoring = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    if (microphoneRef.current) {
-      microphoneRef.current.disconnect();
-    }
-    setAudioLevel(0);
-  };
-
-  const handleCommand = (command) => {
-    console.log('Processing voice command:', command);
-    if (onVoiceCommand) {
-      onVoiceCommand(command);
-    }
-  };
-
-  const resetVoiceState = () => {
     setIsListening(false);
-    setIsWakeWordMode(true);
-    setWakeWordDetected(false);
-    setTranscript('');
-    if (onVoiceStateChange) {
-      onVoiceStateChange({ listening: false, transcript: '' });
-    }
+    setStatus('Click microphone to speak');
   };
 
-  const cleanup = () => {
-    stopListening();
-    stopAudioMonitoring();
-  };
-
-  const playWakeSound = () => {
-    // Simple beep sound for wake word detection
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    
-    oscillator.frequency.value = 800;
-    oscillator.type = 'sine';
-    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
-    
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + 0.2);
-  };
-
-  const getStatusMessage = () => {
-    if (isProcessing) return 'Processing your command...';
-    if (!isListening) return 'Click the microphone to start voice commands';
-    if (isWakeWordMode && !wakeWordDetected) return 'Say "Jarvis" to activate';
-    if (wakeWordDetected && !transcript) return 'Listening for your command...';
-    if (transcript) return 'Say "do it" or "go ahead" to execute';
-    return 'Ready for voice input';
-  };
+  if (!voiceSupported) {
+    return (
+      <div className="voice-unsupported">
+        <p>🚫 Voice recognition is not supported in this browser.</p>
+        <p>Please use Chrome, Edge, or Safari for the best experience.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="voice-interface">
       <div className="voice-controls">
-        {voiceSupported ? (
-          <>
-            <button
-              className={`voice-button ${isListening ? 'listening' : ''} ${wakeWordDetected ? 'activated' : ''}`}
-              onClick={isListening ? stopListening : startListening}
-              disabled={isProcessing}
-              title={isListening ? 'Stop listening' : 'Start voice commands'}
-            >
-              <div className="voice-icon">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
-                    fill="currentColor"
-                  />
-                  <path
-                    d="M19 10v2a7 7 0 0 1-14 0v-2"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M12 19v4M8 23h8"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              
-              {isListening && (
-                <div 
-                  className="audio-visualizer"
-                  style={{
-                    transform: `scale(${1 + audioLevel / 100})`,
-                    opacity: audioLevel / 100
-                  }}
-                />
-              )}
-            </button>
-            
-            <div className="voice-status">
-              <div className={`status-indicator ${isListening ? 'active' : ''} ${wakeWordDetected ? 'wake-detected' : ''}`}>
-                <div className="status-dot" />
-                <span className="status-text">{getStatusMessage()}</span>
-              </div>
-              
-              {transcript && (
-                <div className="transcript">
-                  <strong>Heard:</strong> "{transcript}"
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="voice-unsupported">
-            <span>Voice commands not supported in this browser</span>
+        <button
+          className={`voice-button ${isListening ? 'listening' : ''} ${isProcessing ? 'processing' : ''}`}
+          onClick={toggleListening}
+          disabled={isProcessing}
+          aria-label={isListening ? 'Stop listening' : 'Start listening'}
+        >
+          <span className="voice-icon">🎤</span>
+          {isListening && <div className="audio-visualizer"></div>}
+        </button>
+        
+        <div className="voice-status">
+          <div className={`status-indicator ${isListening ? 'active' : ''}`}>
+            <div className="status-dot"></div>
+            <span className="status-text">{status}</span>
           </div>
-        )}
+        </div>
       </div>
-      
+
+      {transcript && (
+        <div className="transcript">
+          <strong>You said:</strong> "{transcript}"
+        </div>
+      )}
+
       <div className="voice-instructions">
-        <h3>Voice Commands</h3>
+        <h3>How to use voice commands:</h3>
         <div className="instruction-steps">
           <div className="step">
-            <span className="step-number">1</span>
-            <span>Click microphone</span>
+            <div className="step-number">1</div>
+            <span>Click mic</span>
           </div>
           <div className="step">
-            <span className="step-number">2</span>
+            <div className="step-number">2</div>
             <span>Say "Jarvis"</span>
           </div>
           <div className="step">
-            <span className="step-number">3</span>
-            <span>Give your command</span>
-          </div>
-          <div className="step">
-            <span className="step-number">4</span>
-            <span>Say "do it" to execute</span>
+            <div className="step-number">3</div>
+            <span>Give command</span>
           </div>
         </div>
         
         <div className="example-commands">
-          <h4>Example Commands:</h4>
+          <h4>Try saying:</h4>
           <ul>
-            <li>"Jarvis, search the web for AI news, do it"</li>
-            <li>"Jarvis, write a Python hello world, execute"</li>
-            <li>"Jarvis, browse to github.com, go ahead"</li>
+            <li>"Jarvis, hello"</li>
+            <li>"Jarvis, what can you do?"</li>
+            <li>"Jarvis, help me"</li>
           </ul>
         </div>
       </div>

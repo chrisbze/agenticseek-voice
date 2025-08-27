@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgenticSeek Voice Widget</title>
+    <style>
+        .voice-widget {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 400px;
+            margin: 20px auto;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        .voice-button {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            border: 3px solid rgba(255,255,255,0.5);
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .voice-button:hover {
+            transform: scale(1.1);
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .voice-button.active {
+            animation: pulse 2s infinite;
+            background: #4CAF50;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        
+        .status {
+            margin: 15px 0;
+            padding: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        
+        .transcript {
+            margin: 15px 0;
+            padding: 10px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 8px;
+            min-height: 40px;
+            font-size: 14px;
+        }
+        
+        .response {
+            margin: 15px 0;
+            padding: 15px;
+            background: rgba(255,255,255,0.9);
+            color: #333;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="voice-widget">
+        <h3>🎤 AgenticSeek Voice Assistant</h3>
+        <p>Say "Jarvis" to activate voice commands</p>
+        
+        <div class="voice-button" id="voiceBtn" onclick="toggleVoice()">
+            🎤
+        </div>
+        
+        <div class="status" id="status">
+            Click the microphone to start listening
+        </div>
+        
+        <div class="transcript" id="transcript">
+            Your voice commands will appear here...
+        </div>
+        
+        <div class="response" id="response" style="display:none;">
+            AI responses will appear here...
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://agenticseek-voice.onrender.com';
+        let recognition = null;
+        let isListening = false;
+        
+        // Initialize Speech Recognition
+        function initSpeechRecognition() {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'en-US';
+                
+                recognition.onresult = handleSpeechResult;
+                recognition.onerror = handleSpeechError;
+                recognition.onend = handleSpeechEnd;
+                
+                return true;
+            }
+            return false;
+        }
+        
+        function toggleVoice() {
+            if (!recognition && !initSpeechRecognition()) {
+                document.getElementById('status').textContent = 'Speech recognition not supported';
+                return;
+            }
+            
+            if (isListening) {
+                stopListening();
+            } else {
+                startListening();
+            }
+        }
+        
+        function startListening() {
+            isListening = true;
+            document.getElementById('voiceBtn').classList.add('active');
+            document.getElementById('status').textContent = '🎧 Listening... Say "Jarvis" to activate';
+            recognition.start();
+        }
+        
+        function stopListening() {
+            isListening = false;
+            document.getElementById('voiceBtn').classList.remove('active');
+            document.getElementById('status').textContent = 'Click to start listening';
+            if (recognition) recognition.stop();
+        }
+        
+        function handleSpeechResult(event) {
+            let transcript = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                transcript += event.results[i][0].transcript;
+            }
+            
+            document.getElementById('transcript').textContent = transcript;
+            
+            // Check for wake word
+            if (transcript.toLowerCase().includes('jarvis')) {
+                processVoiceCommand(transcript);
+            }
+        }
+        
+        function handleSpeechError(event) {
+            document.getElementById('status').textContent = 'Error: ' + event.error;
+            stopListening();
+        }
+        
+        function handleSpeechEnd() {
+            if (isListening) {
+                // Restart if still supposed to be listening
+                setTimeout(() => {
+                    if (isListening) recognition.start();
+                }, 100);
+            }
+        }
+        
+        async function processVoiceCommand(command) {
+            document.getElementById('status').textContent = '🤔 Processing command...';
+            
+            try {
+                const response = await fetch(`${API_URL}/api/voice`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: command
+                    })
+                });
+                
+                const result = await response.json();
+                
+                // Show response
+                const responseDiv = document.getElementById('response');
+                responseDiv.style.display = 'block';
+                responseDiv.textContent = result.response || result.message || 'Command processed!';
+                
+                // Speak response
+                speakResponse(responseDiv.textContent);
+                
+                document.getElementById('status').textContent = '✅ Command processed successfully';
+                
+            } catch (error) {
+                document.getElementById('status').textContent = '❌ Error processing command';
+                console.error('Voice command error:', error);
+            }
+        }
+        
+        function speakResponse(text) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.8;
+                utterance.pitch = 1;
+                speechSynthesis.speak(utterance);
+            }
+        }
+        
+        // Initialize on load
+        window.onload = function() {
+            document.getElementById('status').textContent = 'Ready! Click microphone to start.';
+        };
+    </script>
+</body>
+</html>

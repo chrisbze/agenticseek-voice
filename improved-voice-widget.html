@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Improved AgenticSeek Voice Widget</title>
+    <style>
+        .voice-widget {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 350px;
+            margin: 20px auto;
+            padding: 25px;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            border-radius: 16px;
+            color: white;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(79, 70, 229, 0.3);
+        }
+        
+        .title {
+            margin: 0 0 20px 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .voice-button {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.15);
+            border: 3px solid rgba(255,255,255,0.3);
+            color: white;
+            font-size: 32px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        .voice-button:hover {
+            transform: scale(1.05);
+            background: rgba(255,255,255,0.25);
+        }
+        
+        .voice-button.listening {
+            background: #10b981;
+            border-color: #10b981;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .voice-button.processing {
+            background: #f59e0b;
+            border-color: #f59e0b;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        
+        .status {
+            margin: 15px 0;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .transcript {
+            margin: 15px 0;
+            padding: 12px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            min-height: 50px;
+            font-size: 14px;
+            font-style: italic;
+        }
+        
+        .response {
+            margin: 15px 0;
+            padding: 15px;
+            background: rgba(255,255,255,0.95);
+            color: #1f2937;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 500;
+        }
+        
+        .debug {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            font-size: 12px;
+            text-align: left;
+        }
+        
+        .instructions {
+            margin: 15px 0;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="voice-widget">
+        <h3 class="title">🎤 Voice Assistant</h3>
+        
+        <div class="voice-button" id="voiceBtn" onclick="toggleVoice()">
+            🎤
+        </div>
+        
+        <div class="status" id="status">
+            Click the microphone to start
+        </div>
+        
+        <div class="instructions">
+            💡 Say "Jarvis" clearly after clicking the mic
+        </div>
+        
+        <div class="transcript" id="transcript">
+            Listening for your voice...
+        </div>
+        
+        <div class="response" id="response" style="display:none;">
+            AI responses appear here
+        </div>
+        
+        <div class="debug" id="debug" style="display:none;">
+            Debug info will show here
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://agenticseek-voice.onrender.com';
+        let recognition = null;
+        let isListening = false;
+        let debugMode = true; // Set to false to hide debug info
+        
+        function log(message) {
+            console.log(message);
+            if (debugMode) {
+                const debugDiv = document.getElementById('debug');
+                debugDiv.style.display = 'block';
+                debugDiv.innerHTML += new Date().toLocaleTimeString() + ': ' + message + '<br>';
+                debugDiv.scrollTop = debugDiv.scrollHeight;
+            }
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            const voiceBtn = document.getElementById('voiceBtn');
+            
+            statusDiv.textContent = message;
+            
+            // Update button appearance based on status
+            voiceBtn.className = 'voice-button';
+            if (type === 'listening') {
+                voiceBtn.classList.add('listening');
+            } else if (type === 'processing') {
+                voiceBtn.classList.add('processing');
+            }
+            
+            log(`Status: ${message}`);
+        }
+        
+        function checkBrowserSupport() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                updateStatus('❌ Speech recognition not supported in this browser');
+                log('Browser does not support speech recognition');
+                return false;
+            }
+            
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                updateStatus('⚠️ HTTPS required for voice recognition');
+                log('HTTPS is required for speech recognition');
+                return false;
+            }
+            
+            log('Browser supports speech recognition');
+            return true;
+        }
+        
+        function initSpeechRecognition() {
+            if (!checkBrowserSupport()) return false;
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            
+            // Configure recognition
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+            recognition.maxAlternatives = 1;
+            
+            // Event handlers
+            recognition.onstart = function() {
+                log('Speech recognition started');
+                updateStatus('🎧 Listening... Say "Jarvis"', 'listening');
+            };
+            
+            recognition.onresult = function(event) {
+                let finalTranscript = '';
+                let interimTranscript = '';
+                
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+                
+                const fullTranscript = finalTranscript + interimTranscript;
+                document.getElementById('transcript').textContent = fullTranscript || 'Listening...';
+                
+                log(`Transcript: ${fullTranscript}`);
+                
+                // Check for wake word (case insensitive)
+                if (fullTranscript.toLowerCase().includes('jarvis')) {
+                    log('Wake word "jarvis" detected');
+                    processVoiceCommand(fullTranscript);
+                }
+            };
+            
+            recognition.onerror = function(event) {
+                log(`Speech recognition error: ${event.error}`);
+                
+                switch(event.error) {
+                    case 'no-speech':
+                        updateStatus('🔇 No speech detected. Try speaking louder.');
+                        break;
+                    case 'audio-capture':
+                        updateStatus('❌ Microphone not accessible. Check permissions.');
+                        break;
+                    case 'not-allowed':
+                        updateStatus('🚫 Microphone permission denied');
+                        break;
+                    case 'network':
+                        updateStatus('🌐 Network error. Check internet connection.');
+                        break;
+                    default:
+                        updateStatus(`❌ Error: ${event.error}`);
+                }
+                
+                // Stop listening on error
+                isListening = false;
+                if (recognition) recognition.stop();
+            };
+            
+            recognition.onend = function() {
+                log('Speech recognition ended');
+                if (isListening) {
+                    // Restart if we're supposed to keep listening
+                    setTimeout(() => {
+                        if (isListening) {
+                            log('Restarting speech recognition');
+                            recognition.start();
+                        }
+                    }, 500);
+                } else {
+                    updateStatus('🎤 Click to start listening');
+                }
+            };
+            
+            return true;
+        }
+        
+        function toggleVoice() {
+            if (!recognition && !initSpeechRecognition()) {
+                return;
+            }
+            
+            if (isListening) {
+                stopListening();
+            } else {
+                startListening();
+            }
+        }
+        
+        function startListening() {
+            log('Starting voice recognition');
+            try {
+                isListening = true;
+                recognition.start();
+                updateStatus('🎧 Listening for "Jarvis"...', 'listening');
+            } catch (error) {
+                log(`Error starting recognition: ${error}`);
+                updateStatus('❌ Failed to start listening');
+                isListening = false;
+            }
+        }
+        
+        function stopListening() {
+            log('Stopping voice recognition');
+            isListening = false;
+            if (recognition) {
+                recognition.stop();
+            }
+            updateStatus('🎤 Click to start listening');
+        }
+        
+        async function processVoiceCommand(command) {
+            updateStatus('🤔 Processing your command...', 'processing');
+            log(`Processing command: ${command}`);
+            
+            try {
+                const response = await fetch(`${API_URL}/api/voice`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: command.trim()
+                    })
+                });
+                
+                log(`API response status: ${response.status}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                log(`API result: ${JSON.stringify(result)}`);
+                
+                // Show response
+                const responseDiv = document.getElementById('response');
+                const responseText = result.response || result.message || 'Command processed successfully!';
+                responseDiv.style.display = 'block';
+                responseDiv.textContent = responseText;
+                
+                // Speak response
+                speakResponse(responseText);
+                
+                updateStatus('✅ Command processed!');
+                
+                // Clear transcript after processing
+                setTimeout(() => {
+                    document.getElementById('transcript').textContent = 'Listening for your voice...';
+                }, 3000);
+                
+            } catch (error) {
+                log(`API error: ${error.message}`);
+                updateStatus('❌ Failed to process command');
+                
+                // Show error in response
+                const responseDiv = document.getElementById('response');
+                responseDiv.style.display = 'block';
+                responseDiv.textContent = `Error: ${error.message}`;
+            }
+        }
+        
+        function speakResponse(text) {
+            if ('speechSynthesis' in window) {
+                log(`Speaking response: ${text}`);
+                
+                // Stop any current speech
+                speechSynthesis.cancel();
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.9;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+                
+                utterance.onstart = () => log('Started speaking');
+                utterance.onend = () => log('Finished speaking');
+                utterance.onerror = (e) => log(`Speech synthesis error: ${e.error}`);
+                
+                speechSynthesis.speak(utterance);
+            } else {
+                log('Speech synthesis not supported');
+            }
+        }
+        
+        // Initialize on page load
+        window.addEventListener('load', function() {
+            log('Page loaded, initializing voice widget');
+            updateStatus('🎤 Ready! Click microphone to start.');
+            
+            // Test API connectivity
+            fetch(`${API_URL}/health`)
+                .then(response => response.json())
+                .then(data => {
+                    log(`API health check: ${JSON.stringify(data)}`);
+                })
+                .catch(error => {
+                    log(`API health check failed: ${error.message}`);
+                    updateStatus('⚠️ API connection issue - voice may not work');
+                });
+        });
+        
+        // Add keyboard shortcut (spacebar to toggle)
+        window.addEventListener('keydown', function(event) {
+            if (event.code === 'Space' && !event.target.matches('input, textarea')) {
+                event.preventDefault();
+                toggleVoice();
+            }
+        });
+    </script>
+</body>
+</html>

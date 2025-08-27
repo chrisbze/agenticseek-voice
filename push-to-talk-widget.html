@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Push-to-Talk Voice Widget</title>
+    <style>
+        .voice-widget {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 350px;
+            margin: 20px auto;
+            padding: 25px;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            border-radius: 16px;
+            color: white;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(79, 70, 229, 0.3);
+        }
+        
+        .voice-button {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            border: 4px solid rgba(255,255,255,0.4);
+            color: white;
+            font-size: 36px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin: 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+        
+        .voice-button:active,
+        .voice-button.active {
+            background: #ef4444;
+            border-color: #dc2626;
+            transform: scale(0.95);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+        }
+        
+        .status {
+            margin: 15px 0;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .instructions {
+            margin: 15px 0;
+            font-size: 14px;
+            opacity: 0.9;
+            line-height: 1.4;
+        }
+        
+        .transcript {
+            margin: 15px 0;
+            padding: 12px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            min-height: 40px;
+            font-size: 14px;
+            font-style: italic;
+        }
+        
+        .response {
+            margin: 15px 0;
+            padding: 15px;
+            background: rgba(255,255,255,0.95);
+            color: #1f2937;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 500;
+        }
+        
+        .error {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            color: #fca5a5;
+        }
+    </style>
+</head>
+<body>
+    <div class="voice-widget">
+        <h3>🎤 Push-to-Talk Assistant</h3>
+        
+        <div class="voice-button" id="voiceBtn">
+            🎤
+        </div>
+        
+        <div class="instructions">
+            <strong>HOLD DOWN</strong> the button while speaking<br>
+            Say: <strong>"Jarvis, [your command]"</strong>
+        </div>
+        
+        <div class="status" id="status">
+            Ready - Hold button to speak
+        </div>
+        
+        <div class="transcript" id="transcript">
+            Your speech will appear here...
+        </div>
+        
+        <div class="response" id="response" style="display:none;">
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://agenticseek-voice.onrender.com';
+        let recognition = null;
+        let isListening = false;
+        let isProcessing = false;
+        let buttonPressed = false;
+        
+        const voiceBtn = document.getElementById('voiceBtn');
+        const statusDiv = document.getElementById('status');
+        const transcriptDiv = document.getElementById('transcript');
+        const responseDiv = document.getElementById('response');
+        
+        function updateStatus(message, isError = false) {
+            statusDiv.textContent = message;
+            statusDiv.className = isError ? 'status error' : 'status';
+            console.log('Status:', message);
+        }
+        
+        function initSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                updateStatus('❌ Speech recognition not supported', true);
+                return false;
+            }
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            
+            // Configure for manual control
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+            
+            recognition.onstart = function() {
+                console.log('Recognition started');
+                updateStatus('🎧 Listening... Speak now!');
+                voiceBtn.classList.add('active');
+            };
+            
+            recognition.onresult = function(event) {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript;
+                }
+                transcriptDiv.textContent = transcript || 'Listening...';
+                
+                // Process final result
+                if (event.results[event.results.length - 1].isFinal) {
+                    processCommand(transcript);
+                }
+            };
+            
+            recognition.onerror = function(event) {
+                console.log('Recognition error:', event.error);
+                updateStatus(`❌ Error: ${event.error}`, true);
+                resetButton();
+            };
+            
+            recognition.onend = function() {
+                console.log('Recognition ended');
+                isListening = false;
+                voiceBtn.classList.remove('active');
+                
+                if (!isProcessing) {
+                    updateStatus('Ready - Hold button to speak');
+                }
+            };
+            
+            return true;
+        }
+        
+        function startListening() {
+            if (isProcessing || isListening) return;
+            
+            if (!recognition && !initSpeechRecognition()) return;
+            
+            try {
+                isListening = true;
+                recognition.start();
+                transcriptDiv.textContent = 'Listening...';
+                responseDiv.style.display = 'none';
+            } catch (error) {
+                console.log('Start error:', error);
+                updateStatus('❌ Failed to start listening', true);
+                resetButton();
+            }
+        }
+        
+        function stopListening() {
+            if (recognition && isListening) {
+                recognition.stop();
+            }
+        }
+        
+        function resetButton() {
+            isListening = false;
+            isProcessing = false;
+            buttonPressed = false;
+            voiceBtn.classList.remove('active');
+            updateStatus('Ready - Hold button to speak');
+        }
+        
+        async function processCommand(transcript) {
+            if (isProcessing || !transcript.trim()) return;
+            
+            // Check for wake word
+            if (!transcript.toLowerCase().includes('jarvis')) {
+                updateStatus('❌ Please say "Jarvis" + your command', true);
+                setTimeout(() => updateStatus('Ready - Hold button to speak'), 2000);
+                return;
+            }
+            
+            isProcessing = true;
+            updateStatus('🤔 Processing your command...');
+            
+            try {
+                console.log('Sending to API:', transcript);
+                
+                const response = await fetch(`${API_URL}/api/voice`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: transcript.trim()
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('API response:', result);
+                
+                // Show response
+                const responseText = result.response || result.message || 'Command processed!';
+                responseDiv.textContent = responseText;
+                responseDiv.style.display = 'block';
+                
+                // Speak response
+                speakResponse(responseText);
+                
+                updateStatus('✅ Done! Hold button for next command');
+                
+            } catch (error) {
+                console.log('API error:', error);
+                updateStatus('❌ Connection failed', true);
+                responseDiv.textContent = 'Sorry, I couldn\'t process that command.';
+                responseDiv.style.display = 'block';
+            } finally {
+                // Reset after 3 seconds
+                setTimeout(() => {
+                    isProcessing = false;
+                    updateStatus('Ready - Hold button to speak');
+                    transcriptDiv.textContent = 'Your speech will appear here...';
+                }, 3000);
+            }
+        }
+        
+        function speakResponse(text) {
+            if ('speechSynthesis' in window) {
+                speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.9;
+                utterance.pitch = 1.0;
+                speechSynthesis.speak(utterance);
+            }
+        }
+        
+        // Mouse events for desktop
+        voiceBtn.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            if (isProcessing) return;
+            buttonPressed = true;
+            startListening();
+        });
+        
+        voiceBtn.addEventListener('mouseup', function(e) {
+            e.preventDefault();
+            if (buttonPressed) {
+                buttonPressed = false;
+                stopListening();
+            }
+        });
+        
+        voiceBtn.addEventListener('mouseleave', function(e) {
+            if (buttonPressed) {
+                buttonPressed = false;
+                stopListening();
+            }
+        });
+        
+        // Touch events for mobile
+        voiceBtn.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (isProcessing) return;
+            buttonPressed = true;
+            startListening();
+        });
+        
+        voiceBtn.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            if (buttonPressed) {
+                buttonPressed = false;
+                stopListening();
+            }
+        });
+        
+        // Prevent context menu
+        voiceBtn.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+        });
+        
+        // Initialize
+        window.addEventListener('load', function() {
+            updateStatus('Ready - Hold button to speak');
+            
+            // Test API connection
+            fetch(`${API_URL}/health`)
+                .then(response => response.json())
+                .then(() => console.log('API connected'))
+                .catch(() => updateStatus('⚠️ API connection issue', true));
+        });
+    </script>
+</body>
+</html>

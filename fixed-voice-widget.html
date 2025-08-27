@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fixed Voice Widget</title>
+    <style>
+        .voice-widget {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 350px;
+            margin: 20px auto;
+            padding: 25px;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            border-radius: 16px;
+            color: white;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(79, 70, 229, 0.3);
+        }
+        
+        .voice-button {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.15);
+            border: 3px solid rgba(255,255,255,0.3);
+            color: white;
+            font-size: 32px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .voice-button:hover {
+            transform: scale(1.05);
+        }
+        
+        .voice-button.listening {
+            background: #10b981;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .voice-button.processing {
+            background: #f59e0b;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        
+        .status {
+            margin: 15px 0;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .transcript {
+            margin: 15px 0;
+            padding: 12px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            min-height: 30px;
+            font-size: 14px;
+        }
+        
+        .response {
+            margin: 15px 0;
+            padding: 15px;
+            background: rgba(255,255,255,0.95);
+            color: #1f2937;
+            border-radius: 10px;
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="voice-widget">
+        <h3>🎤 Voice Assistant</h3>
+        
+        <div class="voice-button" id="voiceBtn" onclick="toggleVoice()">
+            🎤
+        </div>
+        
+        <div class="status" id="status">
+            Press & Hold to speak, then say "Jarvis"
+        </div>
+        
+        <div class="transcript" id="transcript">
+            Ready to listen...
+        </div>
+        
+        <div class="response" id="response" style="display:none;"></div>
+    </div>
+
+    <script>
+        const API_URL = 'https://agenticseek-voice.onrender.com';
+        let recognition = null;
+        let isListening = false;
+        let isProcessing = false;
+        let lastCommand = '';
+        let commandTimeout = null;
+        
+        function initSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                document.getElementById('status').textContent = '❌ Voice not supported in this browser';
+                return false;
+            }
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            
+            // Configure for single-shot recognition
+            recognition.continuous = false;  // Changed to false to prevent loops
+            recognition.interimResults = false;  // Only get final results
+            recognition.lang = 'en-US';
+            recognition.maxAlternatives = 1;
+            
+            recognition.onstart = function() {
+                console.log('Voice recognition started');
+                document.getElementById('status').textContent = '🎧 Listening... Say "Jarvis [your command]"';
+                document.getElementById('voiceBtn').classList.add('listening');
+            };
+            
+            recognition.onresult = function(event) {
+                if (isProcessing) return; // Prevent multiple processing
+                
+                const transcript = event.results[0][0].transcript.trim();
+                document.getElementById('transcript').textContent = transcript;
+                
+                // Only process if transcript contains "jarvis" and is different from last command
+                const lowerTranscript = transcript.toLowerCase();
+                if (lowerTranscript.includes('jarvis') && transcript !== lastCommand) {
+                    lastCommand = transcript;
+                    processVoiceCommand(transcript);
+                } else if (!lowerTranscript.includes('jarvis')) {
+                    document.getElementById('status').textContent = '❌ Say "Jarvis" + your command';
+                    resetToReady();
+                }
+            };
+            
+            recognition.onerror = function(event) {
+                console.log('Speech recognition error:', event.error);
+                
+                switch(event.error) {
+                    case 'no-speech':
+                        document.getElementById('status').textContent = '🔇 No speech detected';
+                        break;
+                    case 'not-allowed':
+                        document.getElementById('status').textContent = '🚫 Microphone permission denied';
+                        break;
+                    default:
+                        document.getElementById('status').textContent = `❌ Error: ${event.error}`;
+                }
+                
+                resetToReady();
+            };
+            
+            recognition.onend = function() {
+                console.log('Speech recognition ended');
+                isListening = false;
+                document.getElementById('voiceBtn').classList.remove('listening');
+                
+                // Don't auto-restart - wait for user to click again
+                if (!isProcessing) {
+                    resetToReady();
+                }
+            };
+            
+            return true;
+        }
+        
+        function toggleVoice() {
+            if (isProcessing) return; // Don't allow new requests while processing
+            
+            if (!recognition && !initSpeechRecognition()) {
+                return;
+            }
+            
+            if (isListening) {
+                stopListening();
+            } else {
+                startListening();
+            }
+        }
+        
+        function startListening() {
+            if (isProcessing) return;
+            
+            try {
+                isListening = true;
+                recognition.start();
+            } catch (error) {
+                console.log('Error starting recognition:', error);
+                document.getElementById('status').textContent = '❌ Failed to start listening';
+                resetToReady();
+            }
+        }
+        
+        function stopListening() {
+            isListening = false;
+            if (recognition) {
+                recognition.stop();
+            }
+            resetToReady();
+        }
+        
+        function resetToReady() {
+            setTimeout(() => {
+                if (!isProcessing) {
+                    document.getElementById('status').textContent = '🎤 Click to speak (say "Jarvis" + command)';
+                    document.getElementById('voiceBtn').classList.remove('listening', 'processing');
+                }
+            }, 1000);
+        }
+        
+        async function processVoiceCommand(command) {
+            if (isProcessing) return; // Prevent duplicate processing
+            
+            isProcessing = true;
+            document.getElementById('voiceBtn').classList.remove('listening');
+            document.getElementById('voiceBtn').classList.add('processing');
+            document.getElementById('status').textContent = '🤔 Processing command...';
+            
+            // Clear any existing timeout
+            if (commandTimeout) {
+                clearTimeout(commandTimeout);
+            }
+            
+            try {
+                console.log('Processing command:', command);
+                
+                const response = await fetch(`${API_URL}/api/voice`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: command
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('API result:', result);
+                
+                // Show response
+                const responseDiv = document.getElementById('response');
+                const responseText = result.response || result.message || 'Command processed!';
+                responseDiv.style.display = 'block';
+                responseDiv.textContent = responseText;
+                
+                // Speak response
+                speakResponse(responseText);
+                
+                document.getElementById('status').textContent = '✅ Done! Click to speak again';
+                
+            } catch (error) {
+                console.log('API error:', error);
+                document.getElementById('status').textContent = '❌ Connection error';
+                
+                const responseDiv = document.getElementById('response');
+                responseDiv.style.display = 'block';
+                responseDiv.textContent = 'Sorry, I had trouble processing that command.';
+            } finally {
+                // Reset processing state after delay
+                commandTimeout = setTimeout(() => {
+                    isProcessing = false;
+                    document.getElementById('voiceBtn').classList.remove('processing');
+                    resetToReady();
+                    
+                    // Clear transcript after processing
+                    document.getElementById('transcript').textContent = 'Ready to listen...';
+                }, 3000);
+            }
+        }
+        
+        function speakResponse(text) {
+            if ('speechSynthesis' in window) {
+                speechSynthesis.cancel(); // Stop any current speech
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.9;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+                
+                speechSynthesis.speak(utterance);
+            }
+        }
+        
+        // Initialize on load
+        window.addEventListener('load', function() {
+            document.getElementById('status').textContent = '🎤 Ready! Click to speak';
+            
+            // Test API
+            fetch(`${API_URL}/health`)
+                .then(response => response.json())
+                .then(() => console.log('API connected'))
+                .catch(() => document.getElementById('status').textContent = '⚠️ API connection issue');
+        });
+    </script>
+</body>
+</html>
