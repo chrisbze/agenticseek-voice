@@ -17,6 +17,6 @@
     }
   ],
   "env": {
-    "REACT_APP_BACKEND_URL": "https://your-backend-url.railway.app"
+    "REACT_APP_BACKEND_URL": "https://agenticseek-voice.onrender.com"
   }
 }
