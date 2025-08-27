@@ -1,10 +1,10 @@
 services:
   - type: web
     name: agenticseek-api
-    env: python
-    buildCommand: echo "No build needed"
-    startCommand: python index.py
+    env: go
+    buildCommand: go build -o agenticseek-voice
+    startCommand: ./agenticseek-voice
     healthCheckPath: /health
     envVars:
       - key: PORT
-        value: 10000
+        value: 8080
