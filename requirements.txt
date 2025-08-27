@@ -1,2 +1,1 @@
-fastapi
-uvicorn
+# No external dependencies needed - uses built-in Python libraries only
