@@ -6,6 +6,7 @@ import numpy as np
 import time
 
 IMPORT_FOUND = True
+pyaudio = None
 
 try:
     import torch
@@ -23,8 +24,8 @@ class AudioRecorder:
     """
     AudioRecorder is a class that records audio from the microphone and adds it to the audio queue.
     """
-    def __init__(self, format: int = pyaudio.paInt16, channels: int = 1, rate: int = 4096, chunk: int = 8192, record_seconds: int = 5, verbose: bool = False):
-        self.format = format
+    def __init__(self, format: int = None, channels: int = 1, rate: int = 4096, chunk: int = 8192, record_seconds: int = 5, verbose: bool = False):
+        self.format = format if format is not None else (pyaudio.paInt16 if IMPORT_FOUND and pyaudio else None)
         self.channels = channels
         self.rate = rate
         self.chunk = chunk

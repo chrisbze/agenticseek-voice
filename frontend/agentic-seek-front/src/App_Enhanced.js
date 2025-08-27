@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import axios from "axios";
 import "./App.css";
-import "./VoiceEnhanced.css";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { ResizableLayout } from "./components/ResizableLayout";
 import VoiceInterface from "./components/VoiceInterface";

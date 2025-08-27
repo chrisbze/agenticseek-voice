@@ -1,4 +1,10 @@
-import readline
+try:
+    import readline
+except ImportError:
+    try:
+        import pyreadline3 as readline
+    except ImportError:
+        readline = None
 from typing import List, Tuple, Type, Dict
 
 from sources.text_to_speech import Speech

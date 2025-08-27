@@ -2,13 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import axios from "axios";
 import "./App.css";
-import "./VoiceEnhanced.css";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { ResizableLayout } from "./components/ResizableLayout";
-import VoiceInterface from "./components/VoiceInterface";
 import faviconPng from "./logo.png";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:7777";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 console.log("Using backend URL:", BACKEND_URL);
 
 function App() {
@@ -21,17 +19,7 @@ function App() {
   const [isOnline, setIsOnline] = useState(false);
   const [status, setStatus] = useState("Agents ready");
   const [expandedReasoning, setExpandedReasoning] = useState(new Set());
-  const [voiceState, setVoiceState] = useState({ listening: false, transcript: '' });
-  const [showVoicePanel, setShowVoicePanel] = useState(false);
   const messagesEndRef = useRef(null);
-  const speechSynth = useRef(null);
-
-  useEffect(() => {
-    // Initialize speech synthesis
-    if ('speechSynthesis' in window) {
-      speechSynth.current = window.speechSynthesis;
-    }
-  }, []);
 
   const fetchLatestAnswer = useCallback(async () => {
     try {
@@ -60,9 +48,6 @@ function App() {
         ]);
         setStatus(data.status);
         scrollToBottom();
-        
-        // Speak the answer if voice is enabled
-        speakText(data.answer);
       } else {
         console.log("Duplicate answer detected, skipping:", data.answer);
       }
@@ -173,26 +158,21 @@ function App() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await submitQuery(query);
-  };
-
-  const submitQuery = async (queryText) => {
     checkHealth();
-    if (!queryText.trim()) {
+    if (!query.trim()) {
       console.log("Empty query");
       return;
     }
-    
-    setMessages((prev) => [...prev, { type: "user", content: queryText }]);
+    setMessages((prev) => [...prev, { type: "user", content: query }]);
     setIsLoading(true);
     setError(null);
 
     try {
-      console.log("Sending query:", queryText);
+      console.log("Sending query:", query);
       setQuery("waiting for response...");
       const res = await axios.post(`${BACKEND_URL}/query`, {
-        query: queryText,
-        tts_enabled: false, // We handle TTS in the frontend
+        query,
+        tts_enabled: false,
       });
       setQuery("Enter your query...");
       console.log("Response:", res.data);
@@ -220,60 +200,6 @@ function App() {
     }
   };
 
-  // Voice Interface Handlers
-  const handleVoiceCommand = async (command) => {
-    console.log("Voice command received:", command);
-    // Clean up the command by removing the wake word and confirmation
-    let cleanCommand = command
-      .replace(/^(hey\s+)?jarvis\s*,?\s*/i, '')
-      .replace(/\s*(do\s+it|go\s+ahead|execute|please|run|start|thanks)\s*$/i, '')
-      .trim();
-    
-    if (cleanCommand) {
-      await submitQuery(cleanCommand);
-    }
-  };
-
-  const handleVoiceStateChange = (state) => {
-    setVoiceState(state);
-  };
-
-  const speakText = (text) => {
-    if (speechSynth.current && text) {
-      // Cancel any ongoing speech
-      speechSynth.current.cancel();
-      
-      // Clean text for better speech
-      const cleanText = text
-        .replace(/```[\s\S]*?```/g, '') // Remove code blocks
-        .replace(/`[^`]*`/g, '') // Remove inline code
-        .replace(/\*\*([^*]*)\*\*/g, '$1') // Remove bold markdown
-        .replace(/\*([^*]*)\*/g, '$1') // Remove italic markdown
-        .replace(/https?:\/\/[^\s]+/g, '') // Remove URLs
-        .trim();
-      
-      if (cleanText) {
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.rate = 0.9;
-        utterance.pitch = 1;
-        utterance.volume = 0.8;
-        
-        // Try to use a good voice
-        const voices = speechSynth.current.getVoices();
-        const englishVoice = voices.find(voice => 
-          voice.lang.startsWith('en') && 
-          (voice.name.includes('Google') || voice.name.includes('Microsoft'))
-        ) || voices.find(voice => voice.lang.startsWith('en'));
-        
-        if (englishVoice) {
-          utterance.voice = englishVoice;
-        }
-        
-        speechSynth.current.speak(utterance);
-      }
-    }
-  };
-
   return (
     <div className="app">
       <header className="header">
@@ -283,7 +209,6 @@ function App() {
           </div>
           <div className="brand-text">
             <h1>AgenticSeek</h1>
-            <span className="brand-subtitle">Voice-Enabled AI Assistant</span>
           </div>
         </div>
         <div className="header-status">
@@ -295,36 +220,8 @@ function App() {
               {isOnline ? "Online" : "Offline"}
             </span>
           </div>
-          {voiceState.listening && (
-            <div className="voice-status-header">
-              <div className="voice-indicator">
-                <div className="voice-dot"></div>
-                <span>Listening...</span>
-              </div>
-            </div>
-          )}
         </div>
         <div className="header-actions">
-          <button
-            className={`action-button voice-toggle ${showVoicePanel ? 'active' : ''}`}
-            onClick={() => setShowVoicePanel(!showVoicePanel)}
-            title="Toggle voice controls"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
-                fill="currentColor"
-              />
-              <path
-                d="M19 10v2a7 7 0 0 1-14 0v-2"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span className="action-text">Voice</span>
-          </button>
           <a
             href="https://github.com/Fosowl/agenticSeek"
             target="_blank"
@@ -342,42 +239,15 @@ function App() {
           </div>
         </div>
       </header>
-
-      {showVoicePanel && (
-        <div className="voice-panel">
-          <VoiceInterface
-            onVoiceCommand={handleVoiceCommand}
-            onVoiceStateChange={handleVoiceStateChange}
-            isProcessing={isLoading}
-          />
-        </div>
-      )}
-
       <main className="main">
         <ResizableLayout initialLeftWidth={50}>
           <div className="chat-section">
-            <div className="chat-header">
-              <h2>Chat Interface</h2>
-              {voiceState.transcript && (
-                <div className="voice-transcript">
-                  <strong>Voice:</strong> "{voiceState.transcript}"
-                </div>
-              )}
-            </div>
+            <h2>Chat Interface</h2>
             <div className="messages">
               {messages.length === 0 ? (
-                <div className="placeholder">
-                  <p>No messages yet. Type below or use voice commands!</p>
-                  <div className="quick-start-tips">
-                    <h4>Quick Start:</h4>
-                    <ul>
-                      <li>🎤 Click "Voice" in the header to enable voice commands</li>
-                      <li>💬 Type your query in the input below</li>
-                      <li>🌐 Try: "search the web for AI news"</li>
-                      <li>💻 Try: "write a Python hello world program"</li>
-                    </ul>
-                  </div>
-                </div>
+                <p className="placeholder">
+                  No messages yet. Type below to start!
+                </p>
               ) : (
                 messages.map((msg, index) => (
                   <div
@@ -434,7 +304,7 @@ function App() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Type your query or use voice commands..."
+                placeholder="Type your query..."
                 disabled={isLoading}
               />
               <div className="action-buttons">

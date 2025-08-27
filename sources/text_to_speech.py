@@ -6,13 +6,21 @@ from sys import modules
 from typing import List, Tuple, Type, Dict
 
 IMPORT_FOUND = True
+USE_FALLBACK = False
+
 try:
     from kokoro import KPipeline
     from IPython.display import display, Audio
     import soundfile as sf
 except ImportError:
-    print("Speech synthesis disabled. Please install the kokoro package.")
-    IMPORT_FOUND = False
+    print("Kokoro not available, trying fallback TTS...")
+    try:
+        from sources.fallback_tts import FallbackSpeech
+        USE_FALLBACK = True
+        print("Using fallback TTS (pyttsx3)")
+    except ImportError:
+        print("Speech synthesis disabled. Please install kokoro or pyttsx3.")
+        IMPORT_FOUND = False
 
 if __name__ == "__main__":
     from utility import pretty_print, animate_thinking
@@ -37,10 +45,20 @@ class Speech():
             "fr": ['ff_siwis']
         }
         self.pipeline = None
+        self.fallback_speech = None
         self.language = language
+        
         if enable and IMPORT_FOUND:
-            self.pipeline = KPipeline(lang_code=self.lang_map[language])
-        self.voice = self.voice_map[language][voice_idx]
+            if USE_FALLBACK:
+                self.fallback_speech = FallbackSpeech(enable=True, language=language, voice_idx=voice_idx)
+            else:
+                self.pipeline = KPipeline(lang_code=self.lang_map[language])
+                
+        if not USE_FALLBACK and language in self.voice_map and voice_idx < len(self.voice_map[language]):
+            self.voice = self.voice_map[language][voice_idx]
+        else:
+            self.voice = None
+            
         self.speed = 1.2
         self.voice_folder = ".voices"
         self.create_voice_folder(self.voice_folder)
@@ -62,7 +80,16 @@ class Speech():
             sentence (str): The text to convert to speech. Will be pre-processed.
             voice_idx (int, optional): Index of the voice to use from the voice map.
         """
-        if not self.pipeline or not IMPORT_FOUND:
+        if not IMPORT_FOUND:
+            return
+            
+        # Use fallback TTS if available
+        if USE_FALLBACK and self.fallback_speech:
+            self.fallback_speech.speak(sentence, voice_idx)
+            return
+            
+        # Use kokoro TTS if available
+        if not self.pipeline:
             return
         if voice_idx >= len(self.voice_map[self.language]):
             pretty_print("Invalid voice number, using default voice", color="error")

@@ -57,7 +57,7 @@ class Tools():
             path = self.config['MAIN']['work_dir'] if 'MAIN' in self.config and 'work_dir' in self.config['MAIN'] else None
         if path is None or path == "":
             print("No work directory specified, using default.")
-            path = self.create_work_dir()
+            path = os.path.dirname(os.getcwd())
         return path
     
     def config_exists(self):
